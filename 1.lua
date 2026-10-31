@@ -4,6 +4,8 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -95,7 +97,7 @@ end
 
 -- Window ----------------------------------------------------------------------
 
-local WIDTH, HEIGHT = 480, 400
+local WIDTH, HEIGHT = 480, 440
 local CENTER = UDim2.new(0.5, -WIDTH / 2, 0.5, -HEIGHT / 2)
 
 local ScreenGui = Janitor:Track(new("ScreenGui", {
@@ -209,11 +211,52 @@ SearchStroke.Parent = Search
 Janitor:Connect(Search.Focused, function() tween(SearchStroke, { Color = C.Accent }) end)
 Janitor:Connect(Search.FocusLost, function() tween(SearchStroke, { Color = C.Border }) end)
 
+-- Server toolbar
+local hop -- defined below
+
+local Toolbar = new("Frame", {
+	Name = "Toolbar",
+	Size = UDim2.new(1, -32, 0, 30),
+	Position = UDim2.fromOffset(16, 102),
+	BackgroundTransparency = 1,
+	Parent = Main,
+}, {
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}),
+})
+
+local function toolbarButton(text, kind, order)
+	local btn = new("TextButton", {
+		Size = UDim2.new(0.25, -6, 1, 0),
+		BackgroundColor3 = C.Panel,
+		Text = text,
+		TextColor3 = C.Text,
+		Font = FONT_MED,
+		TextSize = 12,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		Parent = Toolbar,
+	}, { corner(6), stroke(C.Border) })
+	Janitor:Connect(btn.MouseEnter, function() tween(btn, { BackgroundColor3 = C.RowHover }) end)
+	Janitor:Connect(btn.MouseLeave, function() tween(btn, { BackgroundColor3 = C.Panel }) end)
+	Janitor:Connect(btn.MouseButton1Click, function() hop(kind) end)
+	return btn
+end
+
+toolbarButton("Server Hop", "hop", 1)
+toolbarButton("Small Server", "small", 2)
+toolbarButton("Big Server", "big", 3)
+toolbarButton("Rejoin", "rejoin", 4)
+
 -- List
 local List = new("ScrollingFrame", {
 	Name = "List",
-	Size = UDim2.new(1, -16, 1, -142),
-	Position = UDim2.fromOffset(8, 104),
+	Size = UDim2.new(1, -16, 1, -184),
+	Position = UDim2.fromOffset(8, 144),
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
 	ScrollBarThickness = 3,
@@ -236,7 +279,7 @@ new("Frame", {
 })
 
 local CountLabel = new("TextLabel", {
-	Size = UDim2.new(1, -32, 0, 34),
+	Size = UDim2.new(0.4, -16, 0, 34),
 	Position = UDim2.new(0, 16, 1, -34),
 	BackgroundTransparency = 1,
 	Text = "",
@@ -246,6 +289,24 @@ local CountLabel = new("TextLabel", {
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Parent = Main,
 })
+
+local ServerStatus = new("TextLabel", {
+	Size = UDim2.new(0.6, -16, 0, 34),
+	Position = UDim2.new(0.4, 0, 1, -34),
+	BackgroundTransparency = 1,
+	Text = "",
+	TextColor3 = C.Dim,
+	Font = FONT,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Parent = Main,
+})
+
+local function setServerStatus(text, color)
+	ServerStatus.Text = text
+	ServerStatus.TextColor3 = color or C.Dim
+end
 
 -- Restore pill
 local RESTORE_HIDDEN = UDim2.new(0.5, -50, 1, 50)
@@ -393,6 +454,99 @@ Janitor:Connect(Search:GetPropertyChangedSignal("Text"), function()
 		row.Frame.Visible = query == "" or row.Name:find(query, 1, true) ~= nil
 	end
 	updateCount()
+end)
+
+-- Server hopping ---------------------------------------------------------------
+
+local PlaceId, JobId = game.PlaceId, game.JobId
+
+local function httpGet(url)
+	local ok, body = pcall(function() return game:HttpGet(url) end)
+	if ok and type(body) == "string" and #body > 0 then return body end
+
+	local req = (typeof(request) == "function" and request) or (typeof(http_request) == "function" and http_request)
+	if req then
+		local ok2, res = pcall(req, { Url = url, Method = "GET" })
+		if ok2 and res and res.Body then return res.Body end
+	end
+	error(ok and "Empty response" or tostring(body), 0)
+end
+
+-- order: "Asc" = fewest players first, "Desc" = most players first
+local function fetchServers(order, maxPages, collectAll)
+	local candidates, cursor = {}, nil
+	for _ = 1, maxPages do
+		local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100"):format(PlaceId, order)
+		if cursor then url = url .. "&cursor=" .. cursor end
+
+		local data = HttpService:JSONDecode(httpGet(url))
+		for _, server in ipairs(data.data or {}) do
+			if server.id ~= JobId and server.playing < server.maxPlayers then
+				table.insert(candidates, server)
+			end
+		end
+
+		cursor = data.nextPageCursor
+		if not cursor or (not collectAll and #candidates > 0) then break end
+	end
+	return candidates
+end
+
+local hopping = false
+
+local function finishHop(delay)
+	task.wait(delay)
+	if ScreenGui.Parent then setServerStatus("") end
+	hopping = false
+end
+
+hop = function(kind)
+	if hopping then return end
+	hopping = true
+	setServerStatus(kind == "rejoin" and "Rejoining..." or "Searching for a server...", C.Running)
+
+	task.spawn(function()
+		local ok, err = pcall(function()
+			if kind == "rejoin" then
+				if #Players:GetPlayers() <= 1 or JobId == "" then
+					TeleportService:Teleport(PlaceId, LocalPlayer)
+				else
+					TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LocalPlayer)
+				end
+				return
+			end
+
+			local list
+			if kind == "hop" then
+				list = fetchServers("Asc", 3, true)
+			elseif kind == "small" then
+				list = fetchServers("Asc", 2, false)
+			else
+				list = fetchServers("Desc", 2, false)
+			end
+			if #list == 0 then error("No other servers found", 0) end
+
+			local target = (kind == "hop") and list[math.random(#list)] or list[1]
+			setServerStatus(("Joining server (%d/%d players)"):format(target.playing, target.maxPlayers), C.Running)
+			TeleportService:TeleportToPlaceInstance(PlaceId, target.id, LocalPlayer)
+		end)
+
+		if ok then
+			-- Teleport is in flight; unlock again if it never happens.
+			finishHop(10)
+		else
+			local msg = tostring(err)
+			if msg:find("429") then msg = "Rate limited, try again in a moment" end
+			setServerStatus(msg:sub(1, 60), C.Error)
+			finishHop(3)
+		end
+	end)
+end
+
+Janitor:Connect(TeleportService.TeleportInitFailed, function(player, _, message)
+	if player ~= LocalPlayer then return end
+	setServerStatus("Teleport failed: " .. tostring(message):sub(1, 40), C.Error)
+	task.spawn(finishHop, 3)
 end)
 
 -- Minimize / restore / close --------------------------------------------------
