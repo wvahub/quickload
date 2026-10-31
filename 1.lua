@@ -1,6 +1,4 @@
--- =============================================================================
--- NEXUS SCRIPT HUB - Dark themed UI (versión corregida)
--- =============================================================================
+-- Nexus Script Hub
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -9,38 +7,37 @@ local Players = game:GetService("Players")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Contenedor padre seguro: gethui -> CoreGui -> PlayerGui
 local function getTargetParent()
 	if typeof(gethui) == "function" then
 		local ok, result = pcall(gethui)
 		if ok and result then return result end
 	end
-	local ok = pcall(function() return CoreGui.Name end)
-	if ok then return CoreGui end
+	if pcall(function() return CoreGui.Name end) then return CoreGui end
 	return LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui")
 end
 local TargetParent = getTargetParent()
 
--- Nombre fijo: así se detecta y elimina una instancia anterior
 local UI_NAME = "NexusScriptHub"
-local old = TargetParent:FindFirstChild(UI_NAME)
-if old then old:Destroy() end
+local previous = TargetParent:FindFirstChild(UI_NAME)
+if previous then previous:Destroy() end
 
--- Limpieza de eventos e instancias
 local Janitor = { Connections = {}, Instances = {} }
-function Janitor:AddConnection(conn) table.insert(self.Connections, conn) return conn end
-function Janitor:AddInstance(inst) table.insert(self.Instances, inst) return inst end
+function Janitor:Connect(signal, fn)
+	local conn = signal:Connect(fn)
+	table.insert(self.Connections, conn)
+	return conn
+end
+function Janitor:Track(inst) table.insert(self.Instances, inst) return inst end
 function Janitor:Clean()
-	for _, conn in ipairs(self.Connections) do pcall(function() conn:Disconnect() end) end
-	for _, inst in ipairs(self.Instances) do pcall(function() inst:Destroy() end) end
+	for _, c in ipairs(self.Connections) do pcall(function() c:Disconnect() end) end
+	for _, i in ipairs(self.Instances) do pcall(function() i:Destroy() end) end
 	table.clear(self.Connections)
 	table.clear(self.Instances)
 end
 
--- =============================================================================
--- DATOS
--- =============================================================================
-local ScriptsData = {
+-- Scripts ---------------------------------------------------------------------
+
+local Scripts = {
 	{ Name = "Infinite Yield", Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()' },
 	{ Name = "Novoline", Source = 'loadstring(game:HttpGet("https://scriptblox.com/raw/Universal-Script-Novoline-204721"))()' },
 	{ Name = "Fly", Source = 'loadstring(game:HttpGet("https://scriptblox.com/raw/Universal-Script-fly-v3-by-hibatzzz-243731"))()' },
@@ -50,280 +47,364 @@ local ScriptsData = {
 	{ Name = "My MM2 Autofarm", Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/wvahub/mm2/refs/heads/main/autofarm"))()' },
 }
 
--- =============================================================================
--- TEMA
--- =============================================================================
-local Theme = {
-	Background = Color3.fromRGB(24, 24, 26),
-	Container = Color3.fromRGB(32, 32, 36),
-	RowBg = Color3.fromRGB(40, 40, 44),
-	Text = Color3.fromRGB(245, 245, 245),
-	TextDim = Color3.fromRGB(150, 150, 160),
-	PurpleAccent = Color3.fromRGB(130, 80, 220),
-	BlueAccent = Color3.fromRGB(40, 140, 240),
-	StatusRunning = Color3.fromRGB(230, 160, 40),
-	StatusSuccess = Color3.fromRGB(40, 200, 100),
-	StatusError = Color3.fromRGB(220, 60, 60),
+-- Theme -----------------------------------------------------------------------
+
+local C = {
+	Window   = Color3.fromRGB(17, 17, 20),
+	Panel    = Color3.fromRGB(23, 23, 27),
+	Row      = Color3.fromRGB(26, 26, 31),
+	RowHover = Color3.fromRGB(32, 32, 38),
+	Border   = Color3.fromRGB(42, 42, 50),
+	Text     = Color3.fromRGB(232, 232, 236),
+	Dim      = Color3.fromRGB(122, 122, 134),
+	Accent   = Color3.fromRGB(96, 165, 250),
+	Running  = Color3.fromRGB(234, 179, 8),
+	Success  = Color3.fromRGB(74, 222, 128),
+	Error    = Color3.fromRGB(248, 113, 113),
 }
 
-local function corner(parent, radius)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
-	return c
+local FONT = Enum.Font.BuilderSans
+local FONT_MED = Enum.Font.BuilderSansMedium
+local FONT_BOLD = Enum.Font.BuilderSansBold
+
+-- Helpers ---------------------------------------------------------------------
+
+local function new(class, props, children)
+	local inst = Instance.new(class)
+	local parent = props.Parent
+	props.Parent = nil
+	for k, v in pairs(props) do inst[k] = v end
+	for _, child in ipairs(children or {}) do child.Parent = inst end
+	inst.Parent = parent
+	return inst
 end
 
--- =============================================================================
--- UI
--- =============================================================================
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = UI_NAME
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-Janitor:AddInstance(ScreenGui)
+local function corner(r) return new("UICorner", { CornerRadius = UDim.new(0, r) }) end
+local function stroke(color, transparency)
+	return new("UIStroke", {
+		Color = color or C.Border,
+		Thickness = 1,
+		Transparency = transparency or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 460, 0, 360)
-MainFrame.Position = UDim2.new(0.5, -230, 0.5, -180)
-MainFrame.BackgroundColor3 = Theme.Background
-MainFrame.BorderSizePixel = 0
-MainFrame.ClipsDescendants = true
-MainFrame.Parent = ScreenGui
-corner(MainFrame, 10)
+local function tween(inst, props, duration)
+	TweenService:Create(inst, TweenInfo.new(duration or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
 
--- Barra de título
-local TitleBar = Instance.new("Frame")
-TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 40)
-TitleBar.BackgroundColor3 = Theme.Container
-TitleBar.BorderSizePixel = 0
-TitleBar.Parent = MainFrame
-corner(TitleBar, 10)
+-- Window ----------------------------------------------------------------------
 
--- Parche para cuadrar las esquinas inferiores de la barra
-local Patch = Instance.new("Frame")
-Patch.Name = "Patch"
-Patch.Size = UDim2.new(1, 0, 0, 10)
-Patch.Position = UDim2.new(0, 0, 1, -10)
-Patch.BackgroundColor3 = Theme.Container
-Patch.BorderSizePixel = 0
-Patch.ZIndex = 1
-Patch.Parent = TitleBar
+local WIDTH, HEIGHT = 480, 400
+local CENTER = UDim2.new(0.5, -WIDTH / 2, 0.5, -HEIGHT / 2)
 
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(0, 200, 1, 0)
-TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "Nexus Script Hub"
-TitleLabel.TextColor3 = Theme.Text
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.TextSize = 16
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.ZIndex = 2
-TitleLabel.Parent = TitleBar
+local ScreenGui = Janitor:Track(new("ScreenGui", {
+	Name = UI_NAME,
+	ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}))
 
--- Línea de acento (el degradado necesita un fondo blanco para verse bien)
-local AccentLine = Instance.new("Frame")
-AccentLine.Size = UDim2.new(1, 0, 0, 2)
-AccentLine.Position = UDim2.new(0, 0, 0, 40)
-AccentLine.BackgroundColor3 = Color3.new(1, 1, 1)
-AccentLine.BorderSizePixel = 0
-AccentLine.Parent = MainFrame
+local Main = new("Frame", {
+	Name = "Main",
+	Size = UDim2.fromOffset(WIDTH, HEIGHT),
+	Position = CENTER,
+	BackgroundColor3 = C.Window,
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+	Parent = ScreenGui,
+}, { corner(8), stroke(C.Border) })
 
-local LineGradient = Instance.new("UIGradient")
-LineGradient.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Theme.BlueAccent),
-	ColorSequenceKeypoint.new(1, Theme.PurpleAccent),
+-- Header
+local Header = new("Frame", {
+	Name = "Header",
+	Size = UDim2.new(1, 0, 0, 46),
+	BackgroundTransparency = 1,
+	Parent = Main,
 })
-LineGradient.Parent = AccentLine
 
--- Controles de ventana
-local ControlsContainer = Instance.new("Frame")
-ControlsContainer.Size = UDim2.new(0, 70, 1, 0)
-ControlsContainer.Position = UDim2.new(1, -75, 0, 0)
-ControlsContainer.BackgroundTransparency = 1
-ControlsContainer.ZIndex = 2
-ControlsContainer.Parent = TitleBar
+new("TextLabel", {
+	Size = UDim2.new(1, -120, 1, 0),
+	Position = UDim2.fromOffset(16, 0),
+	BackgroundTransparency = 1,
+	RichText = true,
+	Text = 'Nexus <font color="rgb(122,122,134)">Script Hub</font>',
+	TextColor3 = C.Text,
+	Font = FONT_BOLD,
+	TextSize = 15,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Parent = Header,
+})
 
-local UIListControls = Instance.new("UIListLayout")
-UIListControls.FillDirection = Enum.FillDirection.Horizontal
-UIListControls.HorizontalAlignment = Enum.HorizontalAlignment.Right
-UIListControls.VerticalAlignment = Enum.VerticalAlignment.Center
-UIListControls.SortOrder = Enum.SortOrder.LayoutOrder
-UIListControls.Padding = UDim.new(0, 8)
-UIListControls.Parent = ControlsContainer
+new("Frame", {
+	Size = UDim2.new(1, 0, 0, 1),
+	Position = UDim2.new(0, 0, 1, -1),
+	BackgroundColor3 = C.Border,
+	BorderSizePixel = 0,
+	Parent = Header,
+})
 
-local MinimizeBtn = Instance.new("TextButton")
-MinimizeBtn.Size = UDim2.new(0, 24, 0, 24)
-MinimizeBtn.BackgroundColor3 = Theme.RowBg
-MinimizeBtn.Text = "−"
-MinimizeBtn.TextColor3 = Theme.Text
-MinimizeBtn.Font = Enum.Font.GothamBold
-MinimizeBtn.TextSize = 14
-MinimizeBtn.BorderSizePixel = 0
-MinimizeBtn.AutoButtonColor = true
-MinimizeBtn.LayoutOrder = 1
-MinimizeBtn.ZIndex = 2
-MinimizeBtn.Parent = ControlsContainer
-corner(MinimizeBtn, 6)
+local Controls = new("Frame", {
+	Size = UDim2.fromOffset(64, 28),
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -10, 0.5, 0),
+	BackgroundTransparency = 1,
+	Parent = Header,
+}, {
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 4),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}),
+})
 
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 24, 0, 24)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Theme.StatusError
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 12
-CloseBtn.BorderSizePixel = 0
-CloseBtn.LayoutOrder = 2
-CloseBtn.ZIndex = 2
-CloseBtn.Parent = ControlsContainer
-corner(CloseBtn, 6)
-
--- Lista con scroll
-local ScrollFrame = Instance.new("ScrollingFrame")
-ScrollFrame.Name = "ScriptsList"
-ScrollFrame.Size = UDim2.new(1, -20, 1, -60)
-ScrollFrame.Position = UDim2.new(0, 10, 0, 50)
-ScrollFrame.BackgroundTransparency = 1
-ScrollFrame.BorderSizePixel = 0
-ScrollFrame.ScrollBarThickness = 4
-ScrollFrame.ScrollBarImageColor3 = Theme.PurpleAccent
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-ScrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-ScrollFrame.Parent = MainFrame
-
-local ListLayout = Instance.new("UIListLayout")
-ListLayout.Padding = UDim.new(0, 8)
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.Parent = ScrollFrame
-
-local ListPadding = Instance.new("UIPadding")
-ListPadding.PaddingRight = UDim.new(0, 8)
-ListPadding.PaddingBottom = UDim.new(0, 6)
-ListPadding.Parent = ScrollFrame
-
--- Botón flotante de restauración
-local RESTORE_HIDDEN = UDim2.new(0.5, -65, 1, 50)
-local RESTORE_SHOWN = UDim2.new(0.5, -65, 1, -60)
-
-local RestoreBtn = Instance.new("TextButton")
-RestoreBtn.Name = "RestoreButton"
-RestoreBtn.Size = UDim2.new(0, 130, 0, 40)
-RestoreBtn.Position = RESTORE_HIDDEN
-RestoreBtn.BackgroundColor3 = Theme.Container
-RestoreBtn.Text = "Abrir Hub ⇡"
-RestoreBtn.TextColor3 = Theme.Text
-RestoreBtn.Font = Enum.Font.GothamBold
-RestoreBtn.TextSize = 14
-RestoreBtn.BorderSizePixel = 0
-RestoreBtn.Visible = false
-RestoreBtn.Parent = ScreenGui
-corner(RestoreBtn, 8)
-
-local RestoreStroke = Instance.new("UIStroke")
-RestoreStroke.Color = Theme.BlueAccent
-RestoreStroke.Thickness = 1.5
-RestoreStroke.Parent = RestoreBtn
-
--- =============================================================================
--- FILAS DE SCRIPTS
--- =============================================================================
-local function setStatus(label, text, color)
-	label.Text = text
-	label.TextColor3 = color
+local function controlButton(text, order, hoverColor)
+	local btn = new("TextButton", {
+		Size = UDim2.fromOffset(28, 28),
+		BackgroundColor3 = C.Row,
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = C.Dim,
+		Font = FONT_MED,
+		TextSize = 18,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		Parent = Controls,
+	}, { corner(6) })
+	Janitor:Connect(btn.MouseEnter, function()
+		tween(btn, { BackgroundTransparency = 0, TextColor3 = hoverColor })
+	end)
+	Janitor:Connect(btn.MouseLeave, function()
+		tween(btn, { BackgroundTransparency = 1, TextColor3 = C.Dim })
+	end)
+	return btn
 end
 
-for index, item in ipairs(ScriptsData) do
-	local RowFrame = Instance.new("Frame")
-	RowFrame.Name = "Row_" .. item.Name
-	RowFrame.Size = UDim2.new(1, 0, 0, 46)
-	RowFrame.BackgroundColor3 = Theme.RowBg
-	RowFrame.BorderSizePixel = 0
-	RowFrame.LayoutOrder = index
-	RowFrame.Parent = ScrollFrame
-	corner(RowFrame, 8)
+local MinimizeBtn = controlButton("–", 1, C.Text)
+local CloseBtn = controlButton("×", 2, C.Error)
 
-	local NameLabel = Instance.new("TextLabel")
-	NameLabel.Size = UDim2.new(1, -170, 0, 22)
-	NameLabel.Position = UDim2.new(0, 12, 0, 5)
-	NameLabel.BackgroundTransparency = 1
-	NameLabel.Text = item.Name
-	NameLabel.TextColor3 = Theme.Text
-	NameLabel.Font = Enum.Font.GothamMedium
-	NameLabel.TextSize = 14
-	NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	NameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	NameLabel.Parent = RowFrame
+-- Search
+local Search = new("TextBox", {
+	Size = UDim2.new(1, -32, 0, 34),
+	Position = UDim2.fromOffset(16, 58),
+	BackgroundColor3 = C.Panel,
+	BorderSizePixel = 0,
+	ClearTextOnFocus = false,
+	PlaceholderText = "Search scripts",
+	PlaceholderColor3 = C.Dim,
+	Text = "",
+	TextColor3 = C.Text,
+	Font = FONT,
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Parent = Main,
+}, {
+	corner(6),
+	new("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }),
+})
+local SearchStroke = stroke(C.Border)
+SearchStroke.Parent = Search
+Janitor:Connect(Search.Focused, function() tween(SearchStroke, { Color = C.Accent }) end)
+Janitor:Connect(Search.FocusLost, function() tween(SearchStroke, { Color = C.Border }) end)
 
-	local StatusLabel = Instance.new("TextLabel")
-	StatusLabel.Size = UDim2.new(1, -170, 0, 14)
-	StatusLabel.Position = UDim2.new(0, 12, 0, 27)
-	StatusLabel.BackgroundTransparency = 1
-	StatusLabel.Text = "Listo"
-	StatusLabel.TextColor3 = Theme.TextDim
-	StatusLabel.Font = Enum.Font.Gotham
-	StatusLabel.TextSize = 11
-	StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-	StatusLabel.Parent = RowFrame
+-- List
+local List = new("ScrollingFrame", {
+	Name = "List",
+	Size = UDim2.new(1, -16, 1, -142),
+	Position = UDim2.fromOffset(8, 104),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 3,
+	ScrollBarImageColor3 = C.Border,
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	Parent = Main,
+}, {
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+	new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }),
+})
 
-	local RunBtn = Instance.new("TextButton")
-	RunBtn.Size = UDim2.new(0, 90, 0, 28)
-	RunBtn.Position = UDim2.new(1, -102, 0.5, -14)
-	RunBtn.BackgroundColor3 = Theme.PurpleAccent
-	RunBtn.Text = "Ejecutar"
-	RunBtn.TextColor3 = Theme.Text
-	RunBtn.Font = Enum.Font.GothamBold
-	RunBtn.TextSize = 13
-	RunBtn.BorderSizePixel = 0
-	RunBtn.Parent = RowFrame
-	corner(RunBtn, 6)
+-- Footer
+new("Frame", {
+	Size = UDim2.new(1, 0, 0, 1),
+	Position = UDim2.new(0, 0, 1, -34),
+	BackgroundColor3 = C.Border,
+	BorderSizePixel = 0,
+	Parent = Main,
+})
 
-	local running = false
-	Janitor:AddConnection(RunBtn.MouseButton1Click:Connect(function()
-		if running then return end
-		running = true
-		setStatus(StatusLabel, "Ejecutando...", Theme.StatusRunning)
+local CountLabel = new("TextLabel", {
+	Size = UDim2.new(1, -32, 0, 34),
+	Position = UDim2.new(0, 16, 1, -34),
+	BackgroundTransparency = 1,
+	Text = "",
+	TextColor3 = C.Dim,
+	Font = FONT,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Parent = Main,
+})
+
+-- Restore pill
+local RESTORE_HIDDEN = UDim2.new(0.5, -50, 1, 50)
+local RESTORE_SHOWN = UDim2.new(0.5, -50, 1, -52)
+
+local RestoreBtn = new("TextButton", {
+	Name = "Restore",
+	Size = UDim2.fromOffset(100, 32),
+	Position = RESTORE_HIDDEN,
+	BackgroundColor3 = C.Window,
+	Text = "Nexus",
+	TextColor3 = C.Text,
+	Font = FONT_MED,
+	TextSize = 13,
+	AutoButtonColor = false,
+	BorderSizePixel = 0,
+	Visible = false,
+	Parent = ScreenGui,
+}, { corner(16), stroke(C.Border) })
+
+-- Rows ------------------------------------------------------------------------
+
+local Rows = {}
+
+local function updateCount()
+	local visible = 0
+	for _, row in ipairs(Rows) do
+		if row.Frame.Visible then visible += 1 end
+	end
+	if visible == #Rows then
+		CountLabel.Text = ("%d scripts"):format(#Rows)
+	else
+		CountLabel.Text = ("%d of %d scripts"):format(visible, #Rows)
+	end
+end
+
+for index, item in ipairs(Scripts) do
+	local Row = new("Frame", {
+		Name = item.Name,
+		Size = UDim2.new(1, 0, 0, 52),
+		BackgroundColor3 = C.Row,
+		BorderSizePixel = 0,
+		LayoutOrder = index,
+		Parent = List,
+	}, { corner(6), stroke(C.Border, 0.5) })
+
+	new("TextLabel", {
+		Size = UDim2.new(1, -120, 0, 18),
+		Position = UDim2.fromOffset(14, 9),
+		BackgroundTransparency = 1,
+		Text = item.Name,
+		TextColor3 = C.Text,
+		Font = FONT_MED,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = Row,
+	})
+
+	local Dot = new("Frame", {
+		Size = UDim2.fromOffset(6, 6),
+		Position = UDim2.fromOffset(14, 33),
+		BackgroundColor3 = C.Dim,
+		BorderSizePixel = 0,
+		Parent = Row,
+	}, { corner(3) })
+
+	local Status = new("TextLabel", {
+		Size = UDim2.new(1, -140, 0, 14),
+		Position = UDim2.fromOffset(26, 29),
+		BackgroundTransparency = 1,
+		Text = "Ready",
+		TextColor3 = C.Dim,
+		Font = FONT,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = Row,
+	})
+
+	local Run = new("TextButton", {
+		Size = UDim2.fromOffset(68, 28),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		BackgroundColor3 = C.Accent,
+		BackgroundTransparency = 0.88,
+		Text = "Run",
+		TextColor3 = C.Accent,
+		Font = FONT_MED,
+		TextSize = 13,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		Parent = Row,
+	}, { corner(6) })
+
+	local function setStatus(text, color)
+		Status.Text = text
+		Status.TextColor3 = (color == C.Dim) and C.Dim or color
+		tween(Dot, { BackgroundColor3 = color })
+	end
+
+	Janitor:Connect(Row.MouseEnter, function() tween(Row, { BackgroundColor3 = C.RowHover }) end)
+	Janitor:Connect(Row.MouseLeave, function() tween(Row, { BackgroundColor3 = C.Row }) end)
+	Janitor:Connect(Run.MouseEnter, function() tween(Run, { BackgroundTransparency = 0.72 }) end)
+	Janitor:Connect(Run.MouseLeave, function() tween(Run, { BackgroundTransparency = 0.88 }) end)
+
+	local busy = false
+	Janitor:Connect(Run.MouseButton1Click, function()
+		if busy then return end
+		busy = true
+		Run.Text = "..."
+		setStatus("Running", C.Running)
 
 		task.spawn(function()
 			local ok, err = pcall(function()
 				if typeof(loadstring) ~= "function" then
-					error("loadstring no disponible en este entorno")
+					error("loadstring is unavailable in this environment", 0)
 				end
-				local fn, compileErr = loadstring(item.Source)
-				if not fn then error(compileErr) end
+				local fn, compileError = loadstring(item.Source)
+				if not fn then error(compileError, 0) end
 				fn()
 			end)
 
 			if ok then
-				setStatus(StatusLabel, "Ejecutado correctamente", Theme.StatusSuccess)
+				setStatus("Executed", C.Success)
 			else
-				local msg = tostring(err):sub(1, 40)
-				setStatus(StatusLabel, "Error: " .. msg, Theme.StatusError)
+				setStatus(tostring(err):sub(1, 60), C.Error)
 			end
+			Run.Text = "Run"
 
-			task.wait(1.5)
-			if StatusLabel.Parent then
-				setStatus(StatusLabel, "Listo", Theme.TextDim)
-			end
-			running = false
+			task.wait(2)
+			if Row.Parent then setStatus("Ready", C.Dim) end
+			busy = false
 		end)
-	end))
+	end)
+
+	table.insert(Rows, { Frame = Row, Name = item.Name:lower() })
 end
 
--- =============================================================================
--- MINIMIZAR / RESTAURAR / CERRAR
--- =============================================================================
-local tweenInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+updateCount()
+
+Janitor:Connect(Search:GetPropertyChangedSignal("Text"), function()
+	local query = Search.Text:lower()
+	for _, row in ipairs(Rows) do
+		row.Frame.Visible = query == "" or row.Name:find(query, 1, true) ~= nil
+	end
+	updateCount()
+end)
+
+-- Minimize / restore / close --------------------------------------------------
+
 local minimized = false
 
 local function minimize()
 	if minimized then return end
 	minimized = true
-	MainFrame.Visible = false
+	Main.Visible = false
 	RestoreBtn.Visible = true
-	TweenService:Create(RestoreBtn, tweenInfo, { Position = RESTORE_SHOWN }):Play()
+	tween(RestoreBtn, { Position = RESTORE_SHOWN }, 0.15)
 end
 
 local function restore()
@@ -331,41 +412,41 @@ local function restore()
 	minimized = false
 	RestoreBtn.Visible = false
 	RestoreBtn.Position = RESTORE_HIDDEN
-	MainFrame.Visible = true
+	Main.Visible = true
 end
 
-Janitor:AddConnection(MinimizeBtn.MouseButton1Click:Connect(minimize))
-Janitor:AddConnection(RestoreBtn.MouseButton1Click:Connect(restore))
-Janitor:AddConnection(CloseBtn.MouseButton1Click:Connect(function() Janitor:Clean() end))
+Janitor:Connect(MinimizeBtn.MouseButton1Click, minimize)
+Janitor:Connect(RestoreBtn.MouseButton1Click, restore)
+Janitor:Connect(CloseBtn.MouseButton1Click, function() Janitor:Clean() end)
 
--- =============================================================================
--- ARRASTRAR VENTANA
--- =============================================================================
+-- Dragging --------------------------------------------------------------------
+
 local dragging, dragStart, startPos = false, nil, nil
 
-Janitor:AddConnection(TitleBar.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+Janitor:Connect(Header.InputBegan, function(input)
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = input.Position
-		startPos = MainFrame.Position
+		startPos = Main.Position
 	end
-end))
+end)
 
-Janitor:AddConnection(UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		MainFrame.Position = UDim2.new(
-			startPos.X.Scale, startPos.X.Offset + delta.X,
-			startPos.Y.Scale, startPos.Y.Offset + delta.Y
-		)
+Janitor:Connect(UserInputService.InputChanged, function(input)
+	if not dragging then return end
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseMovement or t == Enum.UserInputType.Touch then
+		local d = input.Position - dragStart
+		Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
 	end
-end))
+end)
 
-Janitor:AddConnection(UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+Janitor:Connect(UserInputService.InputEnded, function(input)
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
 		dragging = false
 	end
-end))
+end)
 
--- Se muestra todo de golpe: un único render en lugar de cientos de recalculos
+-- Everything is built off-screen; parenting once keeps startup instant.
 ScreenGui.Parent = TargetParent
