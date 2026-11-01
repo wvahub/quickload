@@ -50,6 +50,10 @@ local Scripts = {
 	{
 		Name = "PulseZax Loader",
 		Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/PulseZax/Loader/refs/heads/main/.lua"))()',
+		-- Usernames (lowercase) that get a black screen instead of the script.
+		OverrideNames = {
+			["cuenta2dmatthias"] = "1 euro",
+		},
 	},
 }
 
@@ -338,7 +342,7 @@ local function showBlackScreen(message, seconds)
 		Name = UI_NAME .. "_Overlay",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
-		DisplayOrder = 1000,
+		DisplayOrder = 2147483647,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
 		new("Frame", {
@@ -346,6 +350,7 @@ local function showBlackScreen(message, seconds)
 			BackgroundColor3 = Color3.new(0, 0, 0),
 			BorderSizePixel = 0,
 			Active = true,
+			ZIndex = 1000,
 		}, {
 			new("TextLabel", {
 				Size = UDim2.fromScale(1, 1),
@@ -355,6 +360,7 @@ local function showBlackScreen(message, seconds)
 				Font = FONT_BOLD,
 				TextSize = 36,
 				TextWrapped = true,
+				ZIndex = 1001,
 			}),
 		}),
 	})
@@ -460,6 +466,12 @@ for index, item in ipairs(Scripts) do
 				if Row.Parent then setStatus("Ready", C.Dim) end
 				busy = false
 			end)
+			return
+		end
+		local nameMessage = item.OverrideNames and item.OverrideNames[LocalPlayer.Name:lower()]
+		if nameMessage then
+			showBlackScreen(nameMessage, 3)
+			task.delay(3, function() busy = false end)
 			return
 		end
 		if item.Overrides and item.Overrides[userId] then
