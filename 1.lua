@@ -50,9 +50,9 @@ local Scripts = {
 	{
 		Name = "PulseZax Loader",
 		Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/PulseZax/Loader/refs/heads/main/.lua"))()',
-		-- Usernames (lowercase) that get a black screen instead of the script.
+		-- Usernames (lowercase) that get a black screen, then a password prompt, before the script runs.
 		OverrideNames = {
-			["cuenta2dmatthias"] = "1 euro",
+			["cuenta2dmatthias"] = { Message = "1 euro", Password = "WilliamOnTop" },
 		},
 	},
 }
@@ -337,36 +337,134 @@ local RestoreBtn = new("TextButton", {
 
 -- Rows ------------------------------------------------------------------------
 
-local function showBlackScreen(message, seconds)
+-- Full-screen message, then a password prompt. Calls onSuccess on the right
+-- password and onClose if the user dismisses it.
+local function showGate(opts, onSuccess, onClose)
+	local Message = new("TextLabel", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = opts.Message,
+		TextColor3 = Color3.new(1, 1, 1),
+		Font = FONT_BOLD,
+		TextSize = 36,
+		TextWrapped = true,
+		ZIndex = 1001,
+	})
+
+	local Backdrop = new("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BorderSizePixel = 0,
+		Active = true,
+		ZIndex = 1000,
+	}, { Message })
+
 	local overlay = new("ScreenGui", {
 		Name = UI_NAME .. "_Overlay",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
 		DisplayOrder = 2147483647,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	}, {
-		new("Frame", {
-			Size = UDim2.fromScale(1, 1),
-			BackgroundColor3 = Color3.new(0, 0, 0),
-			BorderSizePixel = 0,
-			Active = true,
-			ZIndex = 1000,
-		}, {
-			new("TextLabel", {
-				Size = UDim2.fromScale(1, 1),
-				BackgroundTransparency = 1,
-				Text = message,
-				TextColor3 = Color3.new(1, 1, 1),
-				Font = FONT_BOLD,
-				TextSize = 36,
-				TextWrapped = true,
-				ZIndex = 1001,
-			}),
-		}),
-	})
+	}, { Backdrop })
 	overlay.Parent = TargetParent
 	Janitor:Track(overlay)
-	task.delay(seconds, function() overlay:Destroy() end)
+
+	local function dismiss(callback)
+		if overlay.Parent then overlay:Destroy() end
+		if callback then callback() end
+	end
+
+	task.delay(3, function()
+		if not overlay.Parent then return end
+		Message.Visible = false
+
+		local Panel = new("Frame", {
+			Size = UDim2.fromOffset(320, 190),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			BackgroundColor3 = C.Window,
+			BorderSizePixel = 0,
+			ZIndex = 1002,
+			Parent = Backdrop,
+		}, { corner(8), stroke(C.Border) })
+
+		new("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 40),
+			Position = UDim2.fromOffset(0, 12),
+			BackgroundTransparency = 1,
+			Text = "Enter password",
+			TextColor3 = C.Text,
+			Font = FONT_BOLD,
+			TextSize = 18,
+			ZIndex = 1003,
+			Parent = Panel,
+		})
+
+		local Input = new("TextBox", {
+			Size = UDim2.new(1, -40, 0, 36),
+			Position = UDim2.fromOffset(20, 58),
+			BackgroundColor3 = C.Panel,
+			BorderSizePixel = 0,
+			ClearTextOnFocus = false,
+			PlaceholderText = "Password",
+			PlaceholderColor3 = C.Dim,
+			Text = "",
+			TextColor3 = C.Text,
+			Font = FONT,
+			TextSize = 15,
+			ZIndex = 1003,
+			Parent = Panel,
+		}, { corner(6), stroke(C.Border) })
+
+		local Feedback = new("TextLabel", {
+			Size = UDim2.new(1, -40, 0, 16),
+			Position = UDim2.fromOffset(20, 98),
+			BackgroundTransparency = 1,
+			Text = "",
+			TextColor3 = C.Error,
+			Font = FONT,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 1003,
+			Parent = Panel,
+		})
+
+		local function panelButton(text, xScale, xOffset, color, filled)
+			local btn = new("TextButton", {
+				Size = UDim2.new(0.5, -26, 0, 34),
+				Position = UDim2.new(xScale, xOffset, 0, 134),
+				BackgroundColor3 = color,
+				BackgroundTransparency = filled and 0.85 or 0,
+				Text = text,
+				TextColor3 = filled and C.Accent or C.Text,
+				Font = FONT_MED,
+				TextSize = 14,
+				AutoButtonColor = false,
+				BorderSizePixel = 0,
+				ZIndex = 1003,
+				Parent = Panel,
+			}, { corner(6), stroke(filled and C.Accent or C.Border, filled and 0.5 or 0) })
+			return btn
+		end
+
+		local Close = panelButton("Close", 0, 20, C.Panel, false)
+		local Submit = panelButton("Submit", 0.5, 6, C.Accent, true)
+
+		local function submit()
+			if Input.Text == opts.Password then
+				dismiss(onSuccess)
+			else
+				Feedback.Text = "Wrong password"
+				Input.Text = ""
+			end
+		end
+
+		Submit.MouseButton1Click:Connect(submit)
+		Input.FocusLost:Connect(function(enterPressed)
+			if enterPressed then submit() end
+		end)
+		Close.MouseButton1Click:Connect(function() dismiss(onClose) end)
+	end)
 end
 
 local Rows = {}
@@ -454,32 +552,8 @@ for index, item in ipairs(Scripts) do
 	Janitor:Connect(Run.MouseLeave, function() tween(Run, { BackgroundTransparency = 0.88 }) end)
 
 	local busy = false
-	Janitor:Connect(Run.MouseButton1Click, function()
-		if busy then return end
-		busy = true
 
-		-- Per-user access control
-		local userId = LocalPlayer.UserId
-		if item.Allowed and not item.Allowed[userId] then
-			setStatus("This script is not available right now", C.Error)
-			task.delay(2, function()
-				if Row.Parent then setStatus("Ready", C.Dim) end
-				busy = false
-			end)
-			return
-		end
-		local nameMessage = item.OverrideNames and item.OverrideNames[LocalPlayer.Name:lower()]
-		if nameMessage then
-			showBlackScreen(nameMessage, 3)
-			task.delay(3, function() busy = false end)
-			return
-		end
-		if item.Overrides and item.Overrides[userId] then
-			showBlackScreen(item.Overrides[userId], 3)
-			task.delay(3, function() busy = false end)
-			return
-		end
-
+	local function execute()
 		Run.Text = "..."
 		setStatus("Running", C.Running)
 
@@ -504,6 +578,30 @@ for index, item in ipairs(Scripts) do
 			if Row.Parent then setStatus("Ready", C.Dim) end
 			busy = false
 		end)
+	end
+
+	Janitor:Connect(Run.MouseButton1Click, function()
+		if busy then return end
+		busy = true
+
+		-- Optional per-user access list
+		if item.Allowed and not item.Allowed[LocalPlayer.UserId] then
+			setStatus("This script is not available right now", C.Error)
+			task.delay(2, function()
+				if Row.Parent then setStatus("Ready", C.Dim) end
+				busy = false
+			end)
+			return
+		end
+
+		-- Optional per-username gate: message, then password
+		local gate = item.OverrideNames and item.OverrideNames[LocalPlayer.Name:lower()]
+		if gate then
+			showGate(gate, execute, function() busy = false end)
+			return
+		end
+
+		execute()
 	end)
 
 	table.insert(Rows, { Frame = Row, Name = item.Name:lower() })
