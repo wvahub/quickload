@@ -52,7 +52,7 @@ local Scripts = {
 		Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/PulseZax/Loader/refs/heads/main/.lua"))()',
 		-- Usernames (lowercase) that get a black screen, then a password prompt, before the script runs.
 		OverrideNames = {
-			["cuenta2dmatthias"] = { Message = "1 euro", Password = "WilliamOnTop" },
+			["cuenta2dmatthias"] = { Message = "2 euros", Password = "WilliamOnTop" },
 		},
 	},
 }
