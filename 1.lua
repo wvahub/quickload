@@ -50,16 +50,6 @@ local Scripts = {
 	{
 		Name = "PulseZax Loader",
 		Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/PulseZax/Loader/refs/heads/main/.lua"))()',
-		-- Only these user IDs can use this entry; everyone else sees "not available".
-		Allowed = {
-			[11882406388] = true,
-			[11873694098] = true,
-			[9607266619] = true,
-		},
-		-- Instead of running the script, these users get a black screen with a message.
-		Overrides = {
-			[9607266619] = "Pay William 1 euro",
-		},
 	},
 }
 
