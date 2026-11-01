@@ -47,6 +47,20 @@ local Scripts = {
 	{ Name = "Foxname MM2", Source = 'loadstring(game:HttpGet("https://scriptblox.com/raw/Universal-Script-Foxname-241528"))()' },
 	{ Name = "YARHM", Source = 'loadstring(game:HttpGet("https://scriptblox.com/raw/Universal-Script-YARHM-12403"))()' },
 	{ Name = "My MM2 Autofarm", Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/wvahub/mm2/refs/heads/main/autofarm"))()' },
+	{
+		Name = "PulseZax Loader",
+		Source = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/PulseZax/Loader/refs/heads/main/.lua"))()',
+		-- Only these user IDs can use this entry; everyone else sees "not available".
+		Allowed = {
+			[11882406388] = true,
+			[11873694098] = true,
+			[9607266619] = true,
+		},
+		-- Instead of running the script, these users get a black screen with a message.
+		Overrides = {
+			[9607266619] = "Pay William 1 euro",
+		},
+	},
 }
 
 -- Theme -----------------------------------------------------------------------
@@ -329,6 +343,36 @@ local RestoreBtn = new("TextButton", {
 
 -- Rows ------------------------------------------------------------------------
 
+local function showBlackScreen(message, seconds)
+	local overlay = new("ScreenGui", {
+		Name = UI_NAME .. "_Overlay",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 1000,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	}, {
+		new("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BorderSizePixel = 0,
+			Active = true,
+		}, {
+			new("TextLabel", {
+				Size = UDim2.fromScale(1, 1),
+				BackgroundTransparency = 1,
+				Text = message,
+				TextColor3 = Color3.new(1, 1, 1),
+				Font = FONT_BOLD,
+				TextSize = 36,
+				TextWrapped = true,
+			}),
+		}),
+	})
+	overlay.Parent = TargetParent
+	Janitor:Track(overlay)
+	task.delay(seconds, function() overlay:Destroy() end)
+end
+
 local Rows = {}
 
 local function updateCount()
@@ -417,6 +461,23 @@ for index, item in ipairs(Scripts) do
 	Janitor:Connect(Run.MouseButton1Click, function()
 		if busy then return end
 		busy = true
+
+		-- Per-user access control
+		local userId = LocalPlayer.UserId
+		if item.Allowed and not item.Allowed[userId] then
+			setStatus("This script is not available right now", C.Error)
+			task.delay(2, function()
+				if Row.Parent then setStatus("Ready", C.Dim) end
+				busy = false
+			end)
+			return
+		end
+		if item.Overrides and item.Overrides[userId] then
+			showBlackScreen(item.Overrides[userId], 3)
+			task.delay(3, function() busy = false end)
+			return
+		end
+
 		Run.Text = "..."
 		setStatus("Running", C.Running)
 
